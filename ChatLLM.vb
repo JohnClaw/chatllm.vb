@@ -1,5 +1,6 @@
 Imports System
 Imports System.Runtime.InteropServices
+Imports System.Text
 
 Module ChatLLM
     <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
@@ -15,63 +16,11 @@ Module ChatLLM
     End Function
 
     <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Sub chatllm_set_gen_max_tokens(obj As IntPtr, genMaxTokens As Integer)
+    Private Sub chatllm_user_input(obj As IntPtr, input As IntPtr)
     End Sub
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Sub chatllm_restart(obj As IntPtr, sysPrompt As String)
-    End Sub
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_user_input(obj As IntPtr, input As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_set_ai_prefix(obj As IntPtr, prefix As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_tool_input(obj As IntPtr, input As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_tool_completion(obj As IntPtr, completion As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_text_tokenize(obj As IntPtr, text As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_text_embedding(obj As IntPtr, text As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_qa_rank(obj As IntPtr, question As String, answer As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_rag_select_store(obj As IntPtr, storeName As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Sub chatllm_abort_generation(obj As IntPtr)
-    End Sub
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Sub chatllm_show_statistics(obj As IntPtr)
-    End Sub
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_save_session(obj As IntPtr, fileName As String) As Integer
-    End Function
-
-    <DllImport("libchatllm", CallingConvention:=CallingConvention.StdCall)>
-    Private Function chatllm_load_session(obj As IntPtr, fileName As String) As Integer
-    End Function
 
     <UnmanagedFunctionPointer(CallingConvention.StdCall)>
-    Private Delegate Sub PrintCallback(userData As IntPtr, printType As PrintType, utf8Str As String)
+    Private Delegate Sub PrintCallback(userData As IntPtr, printType As PrintType, utf8Str As IntPtr)
 
     <UnmanagedFunctionPointer(CallingConvention.StdCall)>
     Private Delegate Sub EndCallback(userData As IntPtr)
@@ -90,12 +39,29 @@ Module ChatLLM
         PRINTLN_TOKEN_IDS = 10
     End Enum
 
-    Private Sub ChatLLMPrint(userData As IntPtr, printType As PrintType, utf8Str As String)
+    Private Sub ChatLLMPrint(userData As IntPtr, printType As PrintType, utf8Str As IntPtr)
+        ' Read the UTF-8 bytes from the pointer
+        Dim utf8Bytes As List(Of Byte) = New List(Of Byte)
+        Dim currentByte As Byte
+        Dim ptr As IntPtr = utf8Str
+
+        Do
+            currentByte = Marshal.ReadByte(ptr)
+            If currentByte = 0 Then
+                Exit Do
+            End If
+            utf8Bytes.Add(currentByte)
+            ptr = IntPtr.Add(ptr, 1)
+        Loop
+
+        ' Convert the UTF-8 bytes to a UTF-16 string
+        Dim utf16String As String = Encoding.UTF8.GetString(utf8Bytes.ToArray())
+
         Select Case printType
             Case PrintType.PRINT_CHAT_CHUNK
-                Console.Write(utf8Str)
+                Console.Write(utf16String)
             Case Else
-                Console.WriteLine(utf8Str)
+                Console.WriteLine(utf16String)
         End Select
     End Sub
 
@@ -120,12 +86,16 @@ Module ChatLLM
             Dim input As String = Console.ReadLine()
             If String.IsNullOrEmpty(input) Then Continue While
 
+            ' Convert the input string to UTF-8
+            Dim utf8Bytes As Byte() = Encoding.UTF8.GetBytes(input & vbNullChar) ' Add null terminator
+            Dim utf8Ptr As IntPtr = Marshal.AllocHGlobal(utf8Bytes.Length)
+            Marshal.Copy(utf8Bytes, 0, utf8Ptr, utf8Bytes.Length)
+
             Console.Write("A.I. > ")
-            r = chatllm_user_input(obj, input)
-            If r <> 0 Then
-                Console.WriteLine(">>> chatllm_user_input error: " & r)
-                Exit While
-            End If
+            chatllm_user_input(obj, utf8Ptr)
+
+            ' Free the allocated memory
+            Marshal.FreeHGlobal(utf8Ptr)
         End While
     End Sub
 End Module
